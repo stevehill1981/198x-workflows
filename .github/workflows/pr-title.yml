@@ -1,12 +1,13 @@
 name: PR title
 
-# Fails a pull request whose title is not a conventional commit.
+# Fails a pull request whose title, or any of whose commit subjects, is not a
+# conventional commit.
 #
 # release-plz reads commit subjects on main to choose the version bump and to
-# write the changelog. When a pull request is squash-merged, its title becomes
-# that subject, so an unprefixed title cannot move the version and lands in the
-# changelog under "Other" as a raw line. No local hook ever sees the title, so
-# it gets a check of its own.
+# write the changelog. Family repos rebase-merge, so every commit in the pull
+# request lands on main with its own subject; the title is checked too, because
+# it is what a reviewer reads and what a squash merge would use. An unprefixed
+# subject cannot move the version and lands in the changelog under "Other".
 #
 # Callers must trigger on `edited` as well as the usual events, so fixing a
 # title re-runs the check:
@@ -69,3 +70,48 @@ jobs:
           Edit the title and this check re-runs on its own.
           EOF
           exit 1
+
+  commits:
+    # Rebase merging keeps every commit, so each subject reaches main and
+    # release-plz reads all of them, not just the title
+    # (umbrella decisions/releasing-published-crates.md, 2026-10-19).
+    name: Conventional commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Just the pull request's commits and their parent; no API token needed.
+          fetch-depth: ${{ github.event.pull_request.commits + 1 }}
+          persist-credentials: false
+      - name: Check every commit subject carries a conventional-commit prefix
+        env:
+          COUNT: ${{ github.event.pull_request.commits }}
+        run: |
+          set -euo pipefail
+          types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+          bad=0
+          while IFS=$'\t' read -r sha parents subject; do
+            if [ "$(wc -w <<<"$parents")" -gt 1 ]; then
+              echo "::error::${sha:0:9} is a merge commit, which a rebase merge can't take: $subject"
+              bad=1
+            elif ! printf '%s' "$subject" | grep -Eq "^(${types})(\([a-z0-9._/-]+\))?!?: .+"; then
+              echo "::error::${sha:0:9} is not a conventional commit: $subject"
+              bad=1
+            else
+              echo "OK ${sha:0:9} $subject"
+            fi
+          done < <(git log -n "$COUNT" --format='%H%x09%P%x09%s' HEAD)
+          if [ "$bad" = 1 ]; then
+            cat >&2 <<EOF
+
+          Rebase merging puts each of these commits on main as it is, where
+          release-plz reads its subject. Reword them with <type>[(scope)][!]: <description>
+          (git rebase -i, then reword), and fold fixup or WIP commits into the
+          commit they fix. Rebase onto main instead of merging it in.
+
+          Types: ${types//|/, }
+          EOF
+            exit 1
+          fi

@@ -12,7 +12,7 @@ jobs:
 
 | Workflow | What it checks or does |
 |---|---|
-| [`pr-title.yml`](.github/workflows/pr-title.yml) | Fails a pull request whose title is not a conventional commit, which release-plz needs to bump versions and write changelogs. |
+| [`pr-title.yml`](.github/workflows/pr-title.yml) | Fails a pull request whose title or any commit subject is not a conventional commit. release-plz needs them to bump versions and write changelogs, and rebase merging puts every commit on main. |
 
 More arrive as the family migrates. The order is set in the umbrella's `docs/plans/2026-10-19-ci-efficiency.md`, part C.
 
