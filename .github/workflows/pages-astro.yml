@@ -1,0 +1,95 @@
+name: Pages
+
+# Builds an Astro site and deploys it to GitHub Pages. A pull request builds
+# and runs the checks without deploying.
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#     pages: write
+#     id-token: write
+#   concurrency:
+#     group: pages-${{ github.ref }}
+#     cancel-in-progress: true
+#   jobs:
+#     pages:
+#       uses: stevehill1981/198x-workflows/.github/workflows/pages-astro.yml@v1
+#       with:
+#         browser-check-command: npm run a11y
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version.
+        type: string
+        default: '24'
+      check-command:
+        description: Shell command run after `npm ci` and before the build, such as `npm test`.
+        type: string
+        default: ''
+      browser-check-command:
+        description: Shell command run after the build with Playwright's Chromium installed, such as `npm run a11y`.
+        type: string
+        default: ''
+      output:
+        description: The built site's directory.
+        type: string
+        default: dist
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Astro site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Check before the build
+        if: inputs.check-command != ''
+        env:
+          COMMAND: ${{ inputs.check-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - run: npm run build
+      - name: Install the browser the checks drive
+        if: inputs.browser-check-command != ''
+        run: npx playwright install --with-deps chromium
+      - name: Check the built site in a browser
+        if: inputs.browser-check-command != ''
+        env:
+          COMMAND: ${{ inputs.browser-check-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ inputs.output }}
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
