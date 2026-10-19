@@ -82,14 +82,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          # Just the pull request's commits and their parent; no API token needed.
-          fetch-depth: ${{ github.event.pull_request.commits + 1 }}
-          persist-credentials: false
+          fetch-depth: 1
       - name: Check every commit subject carries a conventional-commit prefix
         env:
           COUNT: ${{ github.event.pull_request.commits }}
         run: |
           set -euo pipefail
+          # Fetch just the pull request's commits. Expressions can't do
+          # arithmetic, so the history is deepened here rather than in fetch-depth.
+          git fetch --quiet --deepen="$COUNT" origin "${{ github.event.pull_request.head.sha }}"
           types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
           bad=0
           while IFS=$'\t' read -r sha parents subject; do
