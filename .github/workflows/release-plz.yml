@@ -1,0 +1,192 @@
+name: Release-plz
+
+# Tags merged releases, then opens or updates the next release PR. Both steps
+# are required: `release-pr` alone opens the PR but never tags, so merging it
+# stalls at the version bump (umbrella decisions/project-skeleton-standard.md).
+#
+# The caller runs this on every push to main and passes its secrets through:
+#
+#   on:
+#     push:
+#       branches: [main]
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#     id-token: write        # crates.io Trusted Publishing, where a repo publishes
+#   jobs:
+#     release-plz:
+#       uses: stevehill1981/198x-workflows/.github/workflows/release-plz.yml@v1
+#       secrets: inherit
+#
+# Tokens: the per-org RELEASE_PLZ_TOKEN is used when the org has one. A tag or
+# branch pushed with GITHUB_TOKEN starts no other workflow, so without it a tag
+# doesn't fire cargo-dist and a release PR gets no CI.
+
+on:
+  workflow_call:
+    inputs:
+      pre-release-command:
+        description: Shell command that must pass before anything is tagged, run from the repo root.
+        type: string
+        default: ''
+      announce:
+        description: Announce created releases in Discord (DISCORD_RELEASE_WEBHOOK, DISCORD_RELEASE_WEBHOOK_ALL).
+        type: boolean
+        default: false
+      release-branch-command:
+        description: Shell command run on the open release PR's branch after release-pr; any files it changes are committed there.
+        type: string
+        default: ''
+      release-branch-commit-message:
+        description: Commit message for release-branch-command's changes.
+        type: string
+        default: 'chore(release): refresh files the release changes'
+      workflows-ref:
+        description: Ref of stevehill1981/198x-workflows to take the announcement script from.
+        type: string
+        default: v1
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release merged versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # release-plz diffs the changelog from the last tag.
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Read pinned toolchain
+        id: toolchain
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      # Before tagging: a tag fires cargo-dist's release, and by then the release exists.
+      - name: Check the release may be tagged
+        if: inputs.pre-release-command != ''
+        env:
+          COMMAND: ${{ inputs.pre-release-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+
+      - name: Run release-plz (tag merged releases)
+        id: release
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Fetch the announcement script
+        if: inputs.announce && steps.release.outputs.releases_created == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: stevehill1981/198x-workflows
+          ref: ${{ inputs.workflows-ref }}
+          path: .198x-workflows
+          persist-credentials: false
+
+      # A missing webhook logs and succeeds: a notification must not fail a
+      # release that has already published.
+      - name: Announce the release in Discord
+        if: inputs.announce && steps.release.outputs.releases_created == 'true'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL }}
+          RELEASES: ${{ steps.release.outputs.releases }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          targets=()
+          [ -n "${WEBHOOK}" ] && targets+=("$WEBHOOK")
+          [ -n "${WEBHOOK_ALL}" ] && [ "${WEBHOOK_ALL}" != "${WEBHOOK}" ] && targets+=("$WEBHOOK_ALL")
+          if [ ${#targets[@]} -eq 0 ]; then
+            echo "::notice::no Discord webhook secret set; nothing posted."
+            exit 0
+          fi
+          rm -f payload-*.json
+          python3 .198x-workflows/scripts/discord-release-payloads.py \
+            --releases "$RELEASES" --repo "$REPO" --server-url "$SERVER_URL"
+          failed=0
+          shopt -s nullglob
+          for payload in payload-*.json; do
+            for target in "${targets[@]}"; do
+              curl --silent --show-error --fail-with-body \
+                --retry 3 --retry-delay 5 --retry-all-errors \
+                -H "Content-Type: application/json" -X POST -d @"$payload" "$target" || failed=1
+            done
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::at least one Discord post failed; see the output above."
+            exit 1
+          fi
+          echo "Announced to ${#targets[@]} Discord channel(s)."
+
+  release-pr:
+    name: Prepare the next release
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: release-plz-pr-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Read pinned toolchain
+        id: toolchain
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - name: Run release-plz (open or update the release PR)
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # release-plz bumps the workspace version on its branch; some repos keep
+      # files that embed that version and must be refreshed in the same PR.
+      - name: Refresh files on the release branch
+        if: inputs.release-branch-command != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          COMMAND: ${{ inputs.release-branch-command }}
+          MESSAGE: ${{ inputs.release-branch-commit-message }}
+        run: |
+          set -euo pipefail
+          branch="$(gh pr list --state open --json headRefName,title \
+            --jq '[.[] | select(.headRefName | startswith("release-plz-")) | select(.title | startswith("chore")) | .headRefName][0] // empty')"
+          if [ -z "$branch" ]; then
+            echo "No open release PR; nothing to refresh."
+            exit 0
+          fi
+          git fetch origin "$branch"
+          git checkout -B "$branch" "origin/$branch"
+          bash -euo pipefail -c "$COMMAND"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Files on $branch are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "$MESSAGE"
+          git push origin "HEAD:$branch"
+          echo "Refreshed files on $branch."
