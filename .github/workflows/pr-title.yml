@@ -1,0 +1,71 @@
+name: PR title
+
+# Fails a pull request whose title is not a conventional commit.
+#
+# release-plz reads commit subjects on main to choose the version bump and to
+# write the changelog. When a pull request is squash-merged, its title becomes
+# that subject, so an unprefixed title cannot move the version and lands in the
+# changelog under "Other" as a raw line. No local hook ever sees the title, so
+# it gets a check of its own.
+#
+# Callers must trigger on `edited` as well as the usual events, so fixing a
+# title re-runs the check:
+#
+#   on:
+#     pull_request:
+#       types: [opened, edited, reopened, synchronize]
+#   jobs:
+#     pr-title:
+#       uses: stevehill1981/198x-workflows/.github/workflows/pr-title.yml@v1
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    name: Conventional title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the title carries a conventional-commit prefix
+        env:
+          # Via the environment, never interpolated into the script: a title is
+          # attacker-controlled text and `${{ }}` would splice it into the shell.
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # The Angular type set, which git-cliff (inside release-plz) parses.
+          # `feat` and `fix` drive the bump; the rest are recorded.
+          types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+
+          # <type>[(scope)][!]: <description>
+          if printf '%s' "$TITLE" | grep -Eq "^(${types})(\([a-z0-9._/-]+\))?!?: .+"; then
+            echo "OK: $TITLE"
+            exit 0
+          fi
+
+          cat >&2 <<EOF
+          The pull request title is not a conventional commit:
+
+              $TITLE
+
+          When this pull request is squash-merged, the title becomes the commit
+          subject on main, where release-plz reads it. Without a prefix it cannot
+          bump the version, and its changelog entry lands under "Other".
+
+          Use <type>[(scope)][!]: <description>, for example:
+
+              feat(adf): let the caller set file protection bits
+              fix: stop verify rejecting disks with no bootstrap
+              docs: describe the ADF create verb
+
+          Types: ${types//|/, }
+          Add ! before the colon for a breaking change.
+
+          Edit the title and this check re-runs on its own.
+          EOF
+          exit 1
