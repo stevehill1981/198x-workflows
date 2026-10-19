@@ -1,0 +1,201 @@
+name: Rust CI
+
+# The universal CI core every 198x Rust repo runs (umbrella
+# decisions/project-skeleton-standard.md): format, Clippy, coverage (which is
+# also the test run, with a floor), and a build and test on macOS and Windows.
+# Project-specific jobs stay in the calling ci.yml beside this call.
+#
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#   concurrency:
+#     group: ci-${{ github.event.pull_request.number || github.ref }}
+#     cancel-in-progress: true
+#   jobs:
+#     rust:
+#       name: Rust
+#       uses: stevehill1981/198x-workflows/.github/workflows/rust-ci.yml@v1
+#       with:
+#         coverage-floor: 75
+#
+# The toolchain comes from rust-toolchain.toml; edit the pin there only.
+
+on:
+  workflow_call:
+    inputs:
+      coverage:
+        description: Run the coverage job, which is also the Linux test run. Off only where a repo runs its own test job.
+        type: boolean
+        default: true
+      coverage-floor:
+        description: Line coverage (%) below which the coverage job fails. Ratchet it up; never down.
+        type: number
+        default: 50
+      coverage-args:
+        description: Extra arguments for `cargo llvm-cov`, such as `--lib --tests`.
+        type: string
+        default: ''
+      clippy-args:
+        description: Arguments for `cargo clippy`.
+        type: string
+        default: '--workspace --all-targets -- -D warnings'
+      platform-test:
+        description: Run `cargo test --workspace` on macOS and Windows as well as `cargo check`.
+        type: boolean
+        default: true
+      linux-packages:
+        description: Space-separated apt packages the Linux jobs need, such as `libasound2-dev libudev-dev`.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read pinned toolchain
+        id: toolchain
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Linux packages
+        if: inputs.linux-packages != ''
+        env:
+          PACKAGES: ${{ inputs.linux-packages }}
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: Read pinned toolchain
+        id: toolchain
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Clippy
+        env:
+          ARGS: ${{ inputs.clippy-args }}
+        run: eval "cargo clippy $ARGS"
+
+  # Coverage is also the test run: cargo-llvm-cov compiles and runs every test
+  # under instrumentation, so one pass gives the regression signal and the
+  # coverage figure. It waits for fmt and Clippy, so a quick lint failure
+  # doesn't pay for the instrumented build.
+  coverage:
+    name: Coverage
+    if: inputs.coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [fmt, clippy]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Linux packages
+        if: inputs.linux-packages != ''
+        env:
+          PACKAGES: ${{ inputs.linux-packages }}
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: Read pinned toolchain
+        id: toolchain
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the tests under coverage
+        env:
+          ARGS: ${{ inputs.coverage-args }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/llvm-cov
+          # --no-fail-fast keeps the coverage data complete; the test status
+          # still decides the job, below.
+          status=0
+          eval "cargo llvm-cov --workspace $ARGS --no-fail-fast --no-report" || status=$?
+          cargo llvm-cov report | tee target/llvm-cov/coverage-summary.txt
+          cargo llvm-cov report --json --summary-only --output-path target/llvm-cov/coverage-summary.json
+          cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
+          if [ "$status" -ne 0 ]; then
+            echo "::error::tests failed (exit $status); see above."
+            exit "$status"
+          fi
+      - name: Enforce the coverage floor
+        env:
+          FLOOR: ${{ inputs.coverage-floor }}
+        run: |
+          python3 - "$FLOOR" <<'PY'
+          import json, os, sys
+          floor = float(sys.argv[1])
+          lines = json.load(open("target/llvm-cov/coverage-summary.json"))["data"][0]["totals"]["lines"]
+          pct = float(lines["percent"])
+          summary = f"Line coverage {pct:.2f}% ({lines['covered']}/{lines['count']} lines), floor {floor:.1f}%"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(f"## Coverage\n\n{summary}\n")
+          if pct < floor:
+              print(f"::error::line coverage {pct:.2f}% is below the {floor:.1f}% floor")
+              sys.exit(1)
+          PY
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            target/llvm-cov/coverage-summary.txt
+            target/llvm-cov/coverage-summary.json
+            target/llvm-cov/lcov.info
+          retention-days: 14
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    needs: [fmt, clippy]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read pinned toolchain
+        id: toolchain
+        shell: bash
+        run: echo "channel=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-${{ matrix.os }}
+      - name: Check the workspace
+        run: cargo check --workspace --all-targets
+      - name: Test the workspace
+        if: inputs.platform-test
+        run: cargo test --workspace
