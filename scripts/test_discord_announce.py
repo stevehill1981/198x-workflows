@@ -239,6 +239,28 @@ class ReleasePlzSourceTest(unittest.TestCase):
         self.assertEqual([i.title for i in items], ["mediaspec198x v0.1.0"])
         self.assertIn("[docs.rs](https://docs.rs/mediaspec198x/0.1.0)", items[0].links)
 
+    def test_finds_a_crate_whose_folder_is_not_its_package_name(self):
+        # lang198x-syntax lives in crates/syntax.
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "aaa"
+            other.mkdir()
+            (other / "Cargo.toml").write_text('[package]\nname = "something-else"\n')
+            broken = Path(tmp) / "broken"
+            broken.mkdir()
+            (broken / "Cargo.toml").write_text("[package\n")
+            crate = Path(tmp) / "syntax"
+            crate.mkdir()
+            (crate / "Cargo.toml").write_text('[package]\nname = "lang198x-syntax"\nversion = "0.1.2"\n')
+            (crate / "CHANGELOG.md").write_text("## [0.1.2] - d\n\nProvenance arrives.\n")
+            items = da.from_release_plz(
+                [{"package_name": "lang198x-syntax", "version": "0.1.2", "tag": ""}],
+                "lang198x/syntax", "https://github.com", Path(tmp), set(),
+                published=lambda p, v: True,
+            )
+            missing = da.crate_changelog(Path(tmp), "not-a-crate")
+        self.assertEqual(items[0].notes, "Provenance arrives.")
+        self.assertEqual(missing, Path(tmp) / "not-a-crate" / "CHANGELOG.md")
+
     def test_reads_notes_from_the_crate_changelog(self):
         with tempfile.TemporaryDirectory() as tmp:
             crate = Path(tmp) / "lang198x-syntax"

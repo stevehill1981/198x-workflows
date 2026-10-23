@@ -36,6 +36,7 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -78,6 +79,26 @@ def release_notes(body: str) -> str:
     if cut:
         body = body[: cut.start()]
     return body.strip()
+
+
+def crate_changelog(crate_dir: Path, package: str) -> Path:
+    """Returns the CHANGELOG.md of the crate named `package` under `crate_dir`.
+
+    A crate's folder is usually named after its package, but not always:
+    lang198x-syntax lives in `crates/syntax`. So when no folder has the
+    package's name, this finds the crate whose Cargo.toml declares it.
+    """
+    named = crate_dir / package
+    if named.is_dir():
+        return named / "CHANGELOG.md"
+    for manifest in sorted(crate_dir.glob("*/Cargo.toml")):
+        try:
+            name = tomllib.loads(manifest.read_text()).get("package", {}).get("name")
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if name == package:
+            return manifest.parent / "CHANGELOG.md"
+    return named / "CHANGELOG.md"
 
 
 def changelog_section(path: Path, version: str) -> str:
@@ -308,7 +329,7 @@ def from_release_plz(
             url = f"https://crates.io/crates/{package}/{version}"
         else:
             url = f"{server_url}/{repo}"
-        notes = changelog_section(crate_dir / package / "CHANGELOG.md", version)
+        notes = changelog_section(crate_changelog(crate_dir, package), version)
         if not notes:
             print(f"::notice::no changelog section for {package} {version}")
         links = []
