@@ -41,8 +41,8 @@ jobs:
           base="https://github.com/rhysd/actionlint/releases/download/v${VERSION}"
           archive="actionlint_${VERSION}_linux_amd64.tar.gz"
           cd "$RUNNER_TEMP"
-          curl -sSfL --retry 3 -o "$archive" "$base/$archive"
-          curl -sSfL --retry 3 -o checksums.txt "$base/actionlint_${VERSION}_checksums.txt"
+          curl -sSfL --retry 3 --retry-all-errors -o "$archive" "$base/$archive"
+          curl -sSfL --retry 3 --retry-all-errors -o checksums.txt "$base/actionlint_${VERSION}_checksums.txt"
           grep " ${archive}\$" checksums.txt | sha256sum -c -
           tar -xzf "$archive" actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
@@ -60,7 +60,7 @@ jobs:
         run: |
           archive="shellcheck-v${VERSION}.linux.x86_64.tar.xz"
           cd "$RUNNER_TEMP"
-          curl -sSfL --retry 3 -o "$archive" \
+          curl -sSfL --retry 3 --retry-all-errors -o "$archive" \
             "https://github.com/koalaman/shellcheck/releases/download/v${VERSION}/$archive"
           echo "$SHA256  $archive" | sha256sum -c -
           tar -xJf "$archive" --strip-components=1 "shellcheck-v${VERSION}/shellcheck"
