@@ -75,6 +75,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Says which credentials this run received, without revealing them, so a
+      # caller can confirm from the run's annotations that its secrets arrive.
+      - name: Report the credentials in use
+        env:
+          HAS_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN != '' }}
+          HAS_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK != '' }}
+          HAS_WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = true ]; then
+            token="RELEASE_PLZ_TOKEN"
+          else
+            token="GITHUB_TOKEN (no release token: tags start no other workflow, release PRs get no CI)"
+          fi
+          echo "::notice title=Release credentials::token=${token}; project webhook=${HAS_WEBHOOK}; family webhook=${HAS_WEBHOOK_ALL}"
       - uses: actions/checkout@v7
         with:
           # release-plz diffs the changelog from the last tag.
@@ -159,6 +173,20 @@ jobs:
       group: release-plz-pr-${{ github.repository }}-${{ github.ref }}
       cancel-in-progress: false
     steps:
+      # Says which credentials this run received, without revealing them, so a
+      # caller can confirm from the run's annotations that its secrets arrive.
+      - name: Report the credentials in use
+        env:
+          HAS_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN != '' }}
+          HAS_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK != '' }}
+          HAS_WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = true ]; then
+            token="RELEASE_PLZ_TOKEN"
+          else
+            token="GITHUB_TOKEN (no release token: tags start no other workflow, release PRs get no CI)"
+          fi
+          echo "::notice title=Release credentials::token=${token}; project webhook=${HAS_WEBHOOK}; family webhook=${HAS_WEBHOOK_ALL}"
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
