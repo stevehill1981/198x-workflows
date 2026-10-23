@@ -31,6 +31,7 @@ jobs:
       - name: Run the tests
         run: |
           python3 --version
+          ls $RUNNER_TEMP
           python3 -m unittest discover -v scripts
 
   # This repository's own workflows, checked by the same shared workflow every

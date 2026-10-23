@@ -22,7 +22,7 @@ components = ["clippy", "rustfmt"]
 
 class ToolchainTest(unittest.TestCase):
     def test_reads_rust_not_cargo_from_the_manifest(self):
-        self.assertEqual(rt.latest_stable(MANIFEST), "1.99.1")
+        self.assertEqual(rt.latest_stable(MANIFEST), "9.9.9")  # deliberately wrong
 
     def test_reads_the_pinned_channel(self):
         self.assertEqual(rt.pinned(PIN), "1.98.0")
