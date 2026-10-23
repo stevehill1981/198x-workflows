@@ -1,0 +1,85 @@
+name: Rust toolchain
+
+# Keeps a repository's rust-toolchain.toml on the latest stable Rust. When the
+# pin falls behind, this opens a `chore: build with Rust <version>` PR, so the
+# new compiler and Clippy get checked by CI before anything moves. Dependabot
+# doesn't update rust-toolchain.toml, so without this pins drift until someone
+# remembers.
+#
+#   on:
+#     schedule:
+#       - cron: '17 6 * * 1'   # weekly
+#     workflow_dispatch:
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#   jobs:
+#     toolchain:
+#       uses: stevehill1981/198x-workflows/.github/workflows/rust-toolchain.yml@v1
+#       secrets:
+#         RELEASE_PLZ_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+#
+# The PR is pushed with the org's release token, because a branch pushed with
+# GITHUB_TOKEN starts no CI. A pin that isn't a plain version, such as
+# "stable" or a dated nightly, is left alone as deliberate.
+
+on:
+  workflow_call:
+    inputs:
+      workflows-ref:
+        description: Ref of stevehill1981/198x-workflows to take the script from.
+        type: string
+        default: v1
+    secrets:
+      RELEASE_PLZ_TOKEN:
+        description: The org's release token, so the bump PR's CI runs. Falls back to GITHUB_TOKEN.
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: Keep Rust current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Fetch the script
+        uses: actions/checkout@v7
+        with:
+          repository: stevehill1981/198x-workflows
+          ref: ${{ inputs.workflows-ref }}
+          path: .198x-workflows
+          persist-credentials: false
+
+      - name: Bump the pin if stable has moved on
+        id: bump
+        run: echo "version=$(python3 .198x-workflows/scripts/rust_toolchain.py rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Open the bump PR
+        if: steps.bump.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="chore/rust-${VERSION}"
+          if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            echo "::notice::a PR for Rust ${VERSION} is already open."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "chore: build with Rust ${VERSION}" -- rust-toolchain.toml
+          git push --force origin "$branch"
+          gh pr create --head "$branch" \
+            --title "chore: build with Rust ${VERSION}" \
+            --body "Rust ${VERSION} is the latest stable release, so this moves \`rust-toolchain.toml\` to it. CI checks the new compiler and Clippy before anything changes on \`main\`. If new Clippy lints fail, fix them on this branch.
+
+          Opened by the family's shared [\`rust-toolchain.yml\`](https://github.com/stevehill1981/198x-workflows/blob/main/.github/workflows/rust-toolchain.yml)."
