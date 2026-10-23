@@ -1,0 +1,45 @@
+name: CI
+
+# Every family repository runs these workflows, and moving the v1 tag changes
+# all of them at once. So nothing merges here without the script tests and
+# workflow lint passing, and v1 moves only to a commit that passed on main.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    name: Script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The runner's default Python, which is what the shared workflows' own
+      # steps run the scripts with.
+      - name: Run the tests
+        run: |
+          python3 --version
+          python3 -m unittest discover -v scripts
+
+  # This repository's own workflows, checked by the same shared workflow every
+  # family repository uses, so it is exercised here first.
+  workflows:
+    name: Workflows
+    uses: ./.github/workflows/workflow-lint.yml
+
+  pr-title:
+    name: PR title
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/pr-title.yml
