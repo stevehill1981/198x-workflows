@@ -1,0 +1,82 @@
+name: Discord release
+
+# Announces a GitHub Release in Discord, for repos whose releases cargo-dist
+# publishes. The full notes, without cargo-dist's install and download tables,
+# go to the project channel. A one-line digest linking straight to that post
+# goes to the family channel. release-plz.yml's `announce` covers crates that
+# have no cargo-dist release.
+#
+# cargo-dist runs this as a post-announce job through a local wrapper, because
+# dist names a job by a local file (`post-announce-jobs = ["./notify-discord"]`):
+#
+#   # .github/workflows/notify-discord.yml
+#   on:
+#     workflow_call:
+#       inputs:
+#         plan:                # passed by dist and deliberately unused
+#           required: true
+#           type: string
+#   jobs:
+#     notify:
+#       uses: stevehill1981/198x-workflows/.github/workflows/discord-release.yml@v1
+#       with:
+#         tag: ${{ github.ref_name }}
+#       # Named, not `inherit`: inherit passes nothing across owners.
+#       secrets:
+#         DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+#         DISCORD_RELEASE_WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL }}
+#
+# The notes are read from the published release, not from dist's plan. The plan
+# is the whole manifest, half a megabyte for Emu198x's 244 assets, and Linux
+# caps one environment string at 128 KB, so passing it stops bash starting.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to announce.
+        type: string
+        required: true
+      workflows-ref:
+        description: Ref of stevehill1981/198x-workflows to take the announcement script from.
+        type: string
+        default: v1
+    secrets:
+      DISCORD_RELEASE_WEBHOOK:
+        description: Discord webhook for the project's release channel.
+        required: false
+      DISCORD_RELEASE_WEBHOOK_ALL:
+        description: Discord webhook for the family-wide release channel.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    name: Post to Discord
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch the announcement script
+        uses: actions/checkout@v7
+        with:
+          repository: stevehill1981/198x-workflows
+          ref: ${{ inputs.workflows-ref }}
+          path: .198x-workflows
+          persist-credentials: false
+
+      # A missing webhook logs and succeeds: a notification must not fail a
+      # release that has already shipped.
+      - name: Announce the release
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .198x-workflows/scripts/discord_announce.py \
+            --repo "$REPO" --server-url "$SERVER_URL" \
+            github-release --tag "$TAG"
