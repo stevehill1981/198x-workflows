@@ -16,8 +16,16 @@ name: Release-plz
 #   jobs:
 #     release-plz:
 #       uses: stevehill1981/198x-workflows/.github/workflows/release-plz.yml@v1
-#       secrets: inherit
+#       secrets:
+#         RELEASE_PLZ_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+#         DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+#         DISCORD_RELEASE_WEBHOOK_ALL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ALL }}
 #
+# Pass the secrets by name. `secrets: inherit` passes nothing here, because
+# GitHub only allows it when the caller is in the same organisation or
+# enterprise as this repository, and this one belongs to a personal account.
+# A caller using it silently falls back to GITHUB_TOKEN and gets no Discord
+# announcement. A secret the org doesn't have is simply empty.
 # Tokens: the per-org RELEASE_PLZ_TOKEN is used when the org has one. A tag or
 # branch pushed with GITHUB_TOKEN starts no other workflow, so without it a tag
 # doesn't fire cargo-dist and a release PR gets no CI.
@@ -45,6 +53,16 @@ on:
         description: Ref of stevehill1981/198x-workflows to take the announcement script from.
         type: string
         default: v1
+    secrets:
+      RELEASE_PLZ_TOKEN:
+        description: The org's release token. Tags and branches pushed with it start other workflows, so a tag fires cargo-dist and a release PR gets CI. Falls back to GITHUB_TOKEN.
+        required: false
+      DISCORD_RELEASE_WEBHOOK:
+        description: Discord webhook for the project's release channel, used when announce is on.
+        required: false
+      DISCORD_RELEASE_WEBHOOK_ALL:
+        description: Discord webhook for the family-wide release channel, used when announce is on.
+        required: false
 
 permissions:
   contents: write
