@@ -40,6 +40,10 @@ on:
         description: The built site's directory.
         type: string
         default: dist
+      workflow-lint:
+        description: Lint the repository's workflows with actionlint (workflow-lint.yml). Off only where a repo runs its own.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -93,3 +97,10 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  # The repository's own workflow files, checked by the family's shared lint.
+  # Independent of the other jobs, so a lint finding never holds up a build.
+  workflows:
+    name: Workflows
+    if: inputs.workflow-lint
+    uses: stevehill1981/198x-workflows/.github/workflows/workflow-lint.yml@v1

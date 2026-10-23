@@ -60,6 +60,10 @@ on:
         description: Run the macOS and Windows build job. Off only where a repo builds those platforms itself.
         type: boolean
         default: true
+      workflow-lint:
+        description: Lint the repository's workflows with actionlint (workflow-lint.yml). Off only where a repo runs its own.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -256,3 +260,10 @@ jobs:
       - name: Test the workspace with all features
         if: inputs.platform-test && inputs.all-features
         run: cargo test --workspace --all-features
+
+  # The repository's own workflow files, checked by the family's shared lint.
+  # Independent of the other jobs, so a lint finding never holds up a build.
+  workflows:
+    name: Workflows
+    if: inputs.workflow-lint
+    uses: stevehill1981/198x-workflows/.github/workflows/workflow-lint.yml@v1
