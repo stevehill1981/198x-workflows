@@ -1,0 +1,61 @@
+name: CodeQL
+
+# Code scanning with the default query suite, one job per language. Callers run
+# it on pushes to main, weekly and by hand, not on every PR push. GitHub's
+# default setup can't be narrowed that way, so it stays off where this runs.
+#
+#   on:
+#     push:
+#       branches: [main]
+#     schedule:
+#       - cron: '41 4 * * 0'
+#     workflow_dispatch:
+#   jobs:
+#     codeql:
+#       uses: stevehill1981/198x-workflows/.github/workflows/codeql.yml@v1
+#       permissions:
+#         contents: read
+#         security-events: write
+#         actions: read
+#       with:
+#         languages: '["actions", "rust"]'
+#
+# Languages are CodeQL's names: actions, c-cpp, csharp, go, java-kotlin,
+# javascript-typescript, python, ruby, rust, swift. Every one here is analysed
+# with build-mode none, so no build runs.
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: The languages to analyse, as a JSON list of CodeQL language names.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

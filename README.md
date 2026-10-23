@@ -19,6 +19,7 @@ jobs:
 | [`release-plz.yml`](.github/workflows/release-plz.yml) | Tags merged releases, then opens or updates the next release PR. Inputs cover a pre-tag check, Discord announcements and files to refresh on the release branch. Emu198x keeps its own cut-from-commits release. |
 | [`workflow-lint.yml`](.github/workflows/workflow-lint.yml) | Runs actionlint, with pinned shellcheck, on a repository's workflows, honouring its `.github/actionlint.yaml`. `rust-ci.yml` and `pages-astro.yml` include it; other repositories call it directly. |
 | [`rust-toolchain.yml`](.github/workflows/rust-toolchain.yml) | Keeps `rust-toolchain.toml` on the latest stable Rust: when stable moves on, opens a `chore: build with Rust <version>` PR so CI checks the new compiler first. Callers run it weekly. |
+| [`codeql.yml`](.github/workflows/codeql.yml) | CodeQL code scanning, one job per language from a `languages` input. Callers run it on pushes to `main`, weekly and by hand. |
 | [`discord-release.yml`](.github/workflows/discord-release.yml) | Announces a cargo-dist GitHub Release in Discord, called from a repo's `notify-discord.yml` post-announce job. Full notes go to the project channel, and a one-line digest linking to them to the family channel. |
 
 More arrive as the family migrates. The order is set in the umbrella's `docs/plans/2026-10-19-ci-efficiency.md`, part C.
