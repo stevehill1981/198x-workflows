@@ -33,6 +33,10 @@ name: Release-plz
 on:
   workflow_call:
     inputs:
+      linux-packages:
+        description: Space-separated apt packages needed to compile or inspect the existing crates during release and semver checks.
+        type: string
+        default: ''
       pre-release-command:
         description: Shell command that must pass before anything is tagged, run from the repo root.
         type: string
@@ -98,6 +102,45 @@ jobs:
           # release-plz diffs the changelog from the last tag.
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install Linux packages
+        if: inputs.linux-packages != ''
+        env:
+          PACKAGES: ${{ inputs.linux-packages }}
+        run: |
+          apt_opts=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          read -ra packages <<< "$PACKAGES"
+          # apt moves down the runner's mirror list only on an error, so a slow
+          # Azure mirror would fail every attempt. Each retry puts another
+          # mirror first (amd64 runners using /etc/apt/apt-mirrors.txt only;
+          # Emu198x's scripts/ci/apt-install.sh does the same).
+          list=/etc/apt/apt-mirrors.txt
+          fallbacks=(http://archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/)
+          rotates=false
+          if [ -f "$list" ] && [ "$(dpkg --print-architecture)" = amd64 ] \
+            && grep -rqs "mirror+file:$list" /etc/apt/sources.list /etc/apt/sources.list.d; then
+            rotates=true
+            sudo cp "$list" "$list.runner"
+          fi
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ] && [ "$rotates" = true ]; then
+              first=${fallbacks[attempt - 2]}
+              {
+                printf '%s\tpriority:1\n' "$first"
+                grep -v -F "$first" "$list.runner" | awk -F'\t' '{ print $1 "\tpriority:" NR + 1 }'
+              } | sudo tee "$list" > /dev/null
+              echo "apt: mirror $first first"
+            fi
+            sudo timeout 120 apt-get "${apt_opts[@]}" update \
+              || echo "::warning::apt-get update attempt ${attempt} incomplete (mirror unreachable)"
+            if sudo timeout 180 apt-get "${apt_opts[@]}" install -y --no-install-recommends "${packages[@]}"; then
+              exit 0
+            fi
+            echo "::warning::apt-get install attempt ${attempt} failed; retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::could not install: $PACKAGES"
+          exit 1
 
       - name: Read pinned toolchain
         id: toolchain
@@ -175,6 +218,45 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install Linux packages
+        if: inputs.linux-packages != ''
+        env:
+          PACKAGES: ${{ inputs.linux-packages }}
+        run: |
+          apt_opts=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          read -ra packages <<< "$PACKAGES"
+          # apt moves down the runner's mirror list only on an error, so a slow
+          # Azure mirror would fail every attempt. Each retry puts another
+          # mirror first (amd64 runners using /etc/apt/apt-mirrors.txt only;
+          # Emu198x's scripts/ci/apt-install.sh does the same).
+          list=/etc/apt/apt-mirrors.txt
+          fallbacks=(http://archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/)
+          rotates=false
+          if [ -f "$list" ] && [ "$(dpkg --print-architecture)" = amd64 ] \
+            && grep -rqs "mirror+file:$list" /etc/apt/sources.list /etc/apt/sources.list.d; then
+            rotates=true
+            sudo cp "$list" "$list.runner"
+          fi
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ] && [ "$rotates" = true ]; then
+              first=${fallbacks[attempt - 2]}
+              {
+                printf '%s\tpriority:1\n' "$first"
+                grep -v -F "$first" "$list.runner" | awk -F'\t' '{ print $1 "\tpriority:" NR + 1 }'
+              } | sudo tee "$list" > /dev/null
+              echo "apt: mirror $first first"
+            fi
+            sudo timeout 120 apt-get "${apt_opts[@]}" update \
+              || echo "::warning::apt-get update attempt ${attempt} incomplete (mirror unreachable)"
+            if sudo timeout 180 apt-get "${apt_opts[@]}" install -y --no-install-recommends "${packages[@]}"; then
+              exit 0
+            fi
+            echo "::warning::apt-get install attempt ${attempt} failed; retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::could not install: $PACKAGES"
+          exit 1
 
       - name: Read pinned toolchain
         id: toolchain
