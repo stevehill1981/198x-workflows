@@ -12,7 +12,7 @@ jobs:
 
 | Workflow | What it checks or does |
 |---|---|
-| [`rust-ci.yml`](.github/workflows/rust-ci.yml) | The universal Rust CI core: format, Clippy, coverage with a floor (also the Linux test run), and a build and test on macOS and Windows. Project jobs stay in the calling `ci.yml`. |
+| [`rust-ci.yml`](.github/workflows/rust-ci.yml) | The universal Rust CI core: format, Clippy, coverage with a floor (also the Linux test run), and an optional build and test on macOS and Windows, off by default. Project jobs stay in the calling `ci.yml`. |
 | [`pages-astro.yml`](.github/workflows/pages-astro.yml) | Builds an Astro site and deploys it to GitHub Pages; pull requests build and run the checks without deploying. Inputs for checks before the build and browser checks after it. |
 | [`pr-title.yml`](.github/workflows/pr-title.yml) | Fails a pull request whose title or any commit subject is not a conventional commit. release-plz needs them to bump versions and write changelogs, and rebase merging puts every commit on main. |
 | [`release-pr.yml`](.github/workflows/release-pr.yml) | Fails a release pull request that sets a manifest version without adding a matching `## [x.y.z]` changelog heading. Other pull requests skip it. |

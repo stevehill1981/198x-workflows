@@ -57,9 +57,12 @@ on:
         type: string
         default: ''
       platform-build:
-        description: Run the macOS and Windows build job. Off only where a repo builds those platforms itself.
+        description: >-
+          Run the macOS and Windows build job. Off by default since 2026-11-03:
+          GitHub's macOS and Windows runners were slow and scarce enough to hold
+          up every pull request, so repos build those platforms when they release.
         type: boolean
-        default: true
+        default: false
       workflow-lint:
         description: Lint the repository's workflows with actionlint (workflow-lint.yml). Off only where a repo runs its own.
         type: boolean
@@ -268,6 +271,8 @@ jobs:
             target/llvm-cov/lcov.info
           retention-days: 14
 
+  # macOS and Windows, only for a repo that asks with `platform-build: true`.
+  # The family builds them at release instead (decisions/project-skeleton-standard.md).
   build:
     name: Build (${{ matrix.os }})
     if: inputs.platform-build
