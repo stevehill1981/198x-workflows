@@ -58,9 +58,10 @@ on:
         default: ''
       platform-build:
         description: >-
-          Run the macOS and Windows build job. Off by default since 2026-11-03:
-          GitHub's macOS and Windows runners were slow and scarce enough to hold
-          up every pull request, so repos build those platforms when they release.
+          Also run the macOS and Windows build job on every pull request. Off by
+          default: those runners can queue long enough to hold up a pull request.
+          The job runs regardless after a merge to the default branch and on
+          release-plz release pull requests.
         type: boolean
         default: false
       workflow-lint:
@@ -271,11 +272,18 @@ jobs:
             target/llvm-cov/lcov.info
           retention-days: 14
 
-  # macOS and Windows, only for a repo that asks with `platform-build: true`.
-  # The family builds them at release instead (decisions/project-skeleton-standard.md).
+  # macOS and Windows. Ordinary pull requests skip them unless the repo asks
+  # with `platform-build: true`, because those runners can queue for many
+  # minutes. They run after every merge to the default branch, where nothing
+  # waits on them, and on release-plz release pull requests, so a release
+  # cannot merge with a platform failing (decisions/project-skeleton-standard.md).
   build:
     name: Build (${{ matrix.os }})
-    if: inputs.platform-build
+    if: >-
+      inputs.platform-build
+      || (github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      || startsWith(github.head_ref, 'release-plz-')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     needs: [fmt, clippy]
